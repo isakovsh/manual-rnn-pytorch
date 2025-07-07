@@ -1,20 +1,16 @@
-import requests
 import torch
 import torch.nn.functional as F
-url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
-response = requests.get(url)
+from utils import load_data, save_training_results, clip_gradients, normalize_gradients
+import torch.optim as optim
 
-# load data
-with open("tiny_shakespeare.txt", "w", encoding="utf-8") as f:
-    f.write(response.text)
+data = load_data()
 
-chars = sorted(list(set(response.text)))
+chars = sorted(list(set(data)))
 char_to_idx = {ch: i for i, ch in enumerate(chars)}
 idx_to_char = {i: ch for i, ch in enumerate(chars)}
 
 # Convert the entire text into a list of indices
-# data = [char_to_idx[ch] for ch in response.text]
-data = torch.tensor([char_to_idx[c] for c in response.text], dtype=torch.long) 
+data = torch.tensor([char_to_idx[c] for c in data], dtype=torch.long) 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -71,8 +67,6 @@ def rnn_forward(xb):
   for t in range(T):
         x_t = W_emb[xb[:, t]]                        # shape: [B, E]
         h_pre = x_t @ W_xh + h @ W_hh + b_h          # [B, H]
-        layer_norm = torch.nn.LayerNorm(hidden_size).to(device)
-        h_pre = layer_norm(h_pre)
         h = torch.tanh(h_pre)                        # [B, H]
         y_t = h @ W_hy + b_y                         # [B, vocab_size]
         logits.append(y_t)
@@ -82,17 +76,6 @@ def rnn_forward(xb):
         cache["h_prev"].append(h_pre)
 
   return torch.stack(logits, dim=1) , cache
-
-
-
-def clip_gradients(grads, max_norm):
-    total_norm = torch.sqrt(sum((g**2).sum() for g in grads))
-    if total_norm > max_norm:
-        scale = max_norm / (total_norm + 1e-6)
-        for g in grads:
-            g.mul_(scale)  # in-place scale
-
-    return total_norm
 
 
 def calculate_loss_backward(logits,y_true,cache,xb):
@@ -178,9 +161,10 @@ def generate_text(start_token=0, max_length=200):
 
     return ''.join([idx_to_char[i] for i in out])
 
+
 # ---------- Training -----------------
 initial_lr = 0.01
-epochs = 1000
+epochs = 6000
 smooth_loss = None
 beta = 0.95
 losses = []
@@ -191,6 +175,8 @@ val_losses =[]
 
 params = [W_xh, W_hh, W_hy, b_h, b_y, W_emb]
 
+optimizer = optim.Adam(params, lr=0.001)
+
 for epoch in range(epochs):
     X, y = get_batch("train")
 
@@ -198,7 +184,7 @@ for epoch in range(epochs):
     logits, cache = rnn_forward(X)
 
     # 2. Backward pass (loss + grads)
-  
+    optimizer.zero_grad()
     loss, dWxh, dWhh, dWhy, db_h, db_y, dW_emb = calculate_loss_backward(logits, y, cache, X)
     losses.append(loss.item())
 
@@ -211,16 +197,18 @@ for epoch in range(epochs):
 
     # 3. Gradient clipping
     grads = [dWxh, dWhh, dWhy, db_h, db_y, dW_emb]
-    total_norm = clip_gradients(grads, max_norm=1.0)
+    total_norm = clip_gradients(grads, max_norm=0.5)
+    grads  = normalize_gradients(grads)
     total_norms.append(total_norm.item())
 
-    # 4. Parameter update
-    
-    
-    with torch.no_grad():
-        for param, dparam in zip([W_xh, W_hh, W_hy, b_h, b_y, W_emb], grads):
-            param -= initial_lr * dparam
+    for param, grad in zip(params, grads):
+        param.grad = grad
 
+    # 4. Parameter update
+    optimizer.step()
+
+    # validation 
+    with torch.no_grad():
         if epoch % 100 == 0:
           xb_val, yb_val = get_batch("val")
           val_logits, cache_val = rnn_forward(xb_val)
@@ -228,7 +216,7 @@ for epoch in range(epochs):
           val_losses.append(val_loss.item())
           print(f"Epoch {epoch:3d} | Loss: {loss.item():.4f} | Val Loss: {val_loss.item()}")
           print(generate_text())
-          print(60*"-")
+          print(100*"-")
 
-    if epoch > 500:
-      initial_lr *= 0.98
+
+save_training_results(losses,smooth_losses,val_losses)
