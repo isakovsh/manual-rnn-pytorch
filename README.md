@@ -14,7 +14,7 @@ A character-level RNN trained **from scratch** in PyTorch — with **manual forw
 
 ## 📉 Loss Curve
 
-![Training Loss](https://github.com/isakovsh/manual-rnn-pytorch/raw/master/loss.png) 
+![Training Loss](https://github.com/isakovsh/manual-rnn-pytorch/blob/master/images/loss_plot.png) 
 
 ## 🧠 Example Training Output ( Actually, my RNN isn’t learning anything—he's too busy scrolling Instagram 😂😂 )
 Epoch   0 | Loss: 4.4631 | Val Loss: 4.4279
